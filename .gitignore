@@ -1,0 +1,4 @@
+.vscode/*
+**/ckps/**
+**/__pycache__/**
+**/data/**

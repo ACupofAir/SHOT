@@ -16,6 +16,7 @@ from loss import CrossEntropyLabelSmooth
 from scipy.spatial.distance import cdist
 from sklearn.metrics import confusion_matrix
 from sklearn.cluster import KMeans
+from datetime import datetime
 
 def op_copy(optimizer):
     for param_group in optimizer.param_groups:
@@ -118,7 +119,7 @@ def cal_acc(loader, netF, netB, netC, flag=False):
     with torch.no_grad():
         iter_test = iter(loader)
         for i in range(len(loader)):
-            data = iter_test.next()
+            data = next(iter_test)
             inputs = data[0]
             labels = data[1]
             inputs = inputs.cuda()
@@ -151,7 +152,7 @@ def cal_acc_oda(loader, netF, netB, netC):
     with torch.no_grad():
         iter_test = iter(loader)
         for i in range(len(loader)):
-            data = iter_test.next()
+            data = next(iter_test)
             inputs = data[0]
             labels = data[1]
             inputs = inputs.cuda()
@@ -206,57 +207,62 @@ def train_source(args):
 
     acc_init = 0
     max_iter = args.max_epoch * len(dset_loaders["source_tr"])
-    interval_iter = max_iter // 10
+    # breakpoint()
+    interval_iter =  max_iter // args.max_epoch
     iter_num = 0
 
     netF.train()
     netB.train()
     netC.train()
 
-    while iter_num < max_iter:
-        try:
-            inputs_source, labels_source = iter_source.next()
-        except:
-            iter_source = iter(dset_loaders["source_tr"])
-            inputs_source, labels_source = iter_source.next()
+    with tqdm(total=max_iter, desc="Training Progress", unit="iter") as pbar:
+        while iter_num < max_iter:
+            try:
+                inputs_source, labels_source = next(iter_source)
+            except:
+                iter_source = iter(dset_loaders["source_tr"])
+                inputs_source, labels_source = next(iter_source)
 
-        if inputs_source.size(0) == 1:
-            continue
+            if inputs_source.size(0) == 1:
+            # raise value error, the size must > 1
+                raise ValueError("Batch size must be greater than 1. Current batch size: {}".format(inputs_source.size(0)))
+                
 
-        iter_num += 1
-        lr_scheduler(optimizer, iter_num=iter_num, max_iter=max_iter)
+            iter_num += 1
+            pbar.update(1)
+            lr_scheduler(optimizer, iter_num=iter_num, max_iter=max_iter)
 
-        inputs_source, labels_source = inputs_source.cuda(), labels_source.cuda()
-        outputs_source = netC(netB(netF(inputs_source)))
-        classifier_loss = CrossEntropyLabelSmooth(num_classes=args.class_num, epsilon=args.smooth)(outputs_source, labels_source)            
-        
-        optimizer.zero_grad()
-        classifier_loss.backward()
-        optimizer.step()
+            inputs_source, labels_source = inputs_source.cuda(), labels_source.cuda()
+            outputs_source = netC(netB(netF(inputs_source)))
+            classifier_loss = CrossEntropyLabelSmooth(num_classes=args.class_num, epsilon=args.smooth)(outputs_source, labels_source)            
 
-        if iter_num % interval_iter == 0 or iter_num == max_iter:
-            netF.eval()
-            netB.eval()
-            netC.eval()
-            if args.dset=='VISDA-C':
-                acc_s_te, acc_list = cal_acc(dset_loaders['source_te'], netF, netB, netC, True)
-                log_str = 'Task: {}, Iter:{}/{}; Accuracy = {:.2f}%'.format(args.name_src, iter_num, max_iter, acc_s_te) + '\n' + acc_list
-            else:
-                acc_s_te, _ = cal_acc(dset_loaders['source_te'], netF, netB, netC, False)
-                log_str = 'Task: {}, Iter:{}/{}; Accuracy = {:.2f}%'.format(args.name_src, iter_num, max_iter, acc_s_te)
-            args.out_file.write(log_str + '\n')
-            args.out_file.flush()
-            print(log_str+'\n')
+            optimizer.zero_grad()
+            classifier_loss.backward()
+            optimizer.step()
 
-            if acc_s_te >= acc_init:
-                acc_init = acc_s_te
-                best_netF = copy.deepcopy(netF.state_dict())
-                best_netB = copy.deepcopy(netB.state_dict())
-                best_netC = copy.deepcopy(netC.state_dict())
+            if iter_num % interval_iter == 0 or iter_num == max_iter:
+                netF.eval()
+                netB.eval()
+                netC.eval()
+                if args.dset=='VISDA-C':
+                    acc_s_te, acc_list = cal_acc(dset_loaders['source_te'], netF, netB, netC, True)
+                    log_str = 'Task: {}, Iter:{}/{}; Accuracy = {:.2f}%'.format(args.name_src, iter_num, max_iter, acc_s_te) + '\n' + acc_list
+                else:
+                    acc_s_te, _ = cal_acc(dset_loaders['source_te'], netF, netB, netC, False)
+                    log_str = 'Task: {}, Iter:{}/{}; Accuracy = {:.2f}%'.format(args.name_src, iter_num, max_iter, acc_s_te)
+                args.out_file.write(log_str + '\n')
+                args.out_file.flush()
+                print(log_str+'\n')
 
-            netF.train()
-            netB.train()
-            netC.train()
+                if acc_s_te >= acc_init:
+                    acc_init = acc_s_te
+                    best_netF = copy.deepcopy(netF.state_dict())
+                    best_netB = copy.deepcopy(netB.state_dict())
+                    best_netC = copy.deepcopy(netC.state_dict())
+
+                netF.train()
+                netB.train()
+                netC.train()
                 
     torch.save(best_netF, osp.join(args.output_dir_src, "source_F.pt"))
     torch.save(best_netB, osp.join(args.output_dir_src, "source_B.pt"))
@@ -312,7 +318,7 @@ if __name__ == "__main__":
     parser.add_argument('--s', type=int, default=0, help="source")
     parser.add_argument('--t', type=int, default=1, help="target")
     parser.add_argument('--max_epoch', type=int, default=20, help="max iterations")
-    parser.add_argument('--batch_size', type=int, default=64, help="batch_size")
+    parser.add_argument('--batch_size', type=int, default=2, help="batch_size (must be greater than 1)")
     parser.add_argument('--worker', type=int, default=4, help="number of workers")
     parser.add_argument('--dset', type=str, default='office-home', choices=['VISDA-C', 'office', 'office-home', 'office-caltech'])
     parser.add_argument('--lr', type=float, default=1e-2, help="learning rate")
@@ -363,18 +369,22 @@ if __name__ == "__main__":
             args.src_classes = [i for i in range(25)]
             args.tar_classes = [i for i in range(65)]
 
-    args.output_dir_src = osp.join(args.output, args.da, args.dset, names[args.s][0].upper())
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    args.output_dir_src = osp.join(args.output, args.da, args.dset, names[args.s][0].upper(), timestamp)
+    print(args.output_dir_src)
     args.name_src = names[args.s][0].upper()
     if not osp.exists(args.output_dir_src):
         os.system('mkdir -p ' + args.output_dir_src)
     if not osp.exists(args.output_dir_src):
         os.mkdir(args.output_dir_src)
 
-    args.out_file = open(osp.join(args.output_dir_src, 'log.txt'), 'w')
+    # * train
+    args.out_file = open(osp.join(args.output_dir_src, 'log_train.txt'), 'w')
     args.out_file.write(print_args(args)+'\n')
     args.out_file.flush()
     train_source(args)
 
+    # * test
     args.out_file = open(osp.join(args.output_dir_src, 'log_test.txt'), 'w')
     for i in range(len(names)):
         if i == args.s:
@@ -382,7 +392,7 @@ if __name__ == "__main__":
         args.t = i
         args.name = names[args.s][0].upper() + names[args.t][0].upper()
 
-        folder = '/Checkpoint/liangjian/tran/data/'
+        folder = '/home/june_wsl/Workspace/SHOT/object/data/'
         args.s_dset_path = folder + args.dset + '/' + names[args.s] + '_list.txt'
         args.test_dset_path = folder + args.dset + '/' + names[args.t] + '_list.txt'
 
