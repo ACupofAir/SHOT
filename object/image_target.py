@@ -95,7 +95,7 @@ def cal_acc(loader, netF, netB, netC, flag=False):
     with torch.no_grad():
         iter_test = iter(loader)
         for i in range(len(loader)):
-            data = iter_test.next()
+            data = next(iter_test)
             inputs = data[0]
             labels = data[1]
             inputs = inputs.cuda()
@@ -161,70 +161,72 @@ def train_target(args):
     interval_iter = max_iter // args.interval
     iter_num = 0
 
-    while iter_num < max_iter:
-        try:
-            inputs_test, _, tar_idx = iter_test.next()
-        except:
-            iter_test = iter(dset_loaders["target"])
-            inputs_test, _, tar_idx = iter_test.next()
+    with tqdm(total=max_iter, desc="Training Progress", unit="iter") as pbar:
+        while iter_num < max_iter:
+            try:
+                inputs_test, _, tar_idx = next(iter_test)
+            except:
+                iter_test = iter(dset_loaders["target"])
+                inputs_test, _, tar_idx = next(iter_test)
 
-        if inputs_test.size(0) == 1:
-            continue
+            if inputs_test.size(0) == 1:
+                raise ValueError("Batch size must be greater than 1. Current batch size: {}".format(inputs_test.size(0)))
 
-        if iter_num % interval_iter == 0 and args.cls_par > 0:
-            netF.eval()
-            netB.eval()
-            mem_label = obtain_label(dset_loaders['test'], netF, netB, netC, args)
-            mem_label = torch.from_numpy(mem_label).cuda()
-            netF.train()
-            netB.train()
+            if iter_num % interval_iter == 0 and args.cls_par > 0:
+                netF.eval()
+                netB.eval()
+                mem_label = obtain_label(dset_loaders['test'], netF, netB, netC, args)
+                mem_label = torch.from_numpy(mem_label).cuda()
+                netF.train()
+                netB.train()
 
-        inputs_test = inputs_test.cuda()
+            inputs_test = inputs_test.cuda()
 
-        iter_num += 1
-        lr_scheduler(optimizer, iter_num=iter_num, max_iter=max_iter)
+            iter_num += 1
+            pbar.update(1)
+            lr_scheduler(optimizer, iter_num=iter_num, max_iter=max_iter)
 
-        features_test = netB(netF(inputs_test))
-        outputs_test = netC(features_test)
+            features_test = netB(netF(inputs_test))
+            outputs_test = netC(features_test)
 
-        if args.cls_par > 0:
-            pred = mem_label[tar_idx]
-            classifier_loss = nn.CrossEntropyLoss()(outputs_test, pred)
-            classifier_loss *= args.cls_par
-            if iter_num < interval_iter and args.dset == "VISDA-C":
-                classifier_loss *= 0
-        else:
-            classifier_loss = torch.tensor(0.0).cuda()
-
-        if args.ent:
-            softmax_out = nn.Softmax(dim=1)(outputs_test)
-            entropy_loss = torch.mean(loss.Entropy(softmax_out))
-            if args.gent:
-                msoftmax = softmax_out.mean(dim=0)
-                gentropy_loss = torch.sum(-msoftmax * torch.log(msoftmax + args.epsilon))
-                entropy_loss -= gentropy_loss
-            im_loss = entropy_loss * args.ent_par
-            classifier_loss += im_loss
-
-        optimizer.zero_grad()
-        classifier_loss.backward()
-        optimizer.step()
-
-        if iter_num % interval_iter == 0 or iter_num == max_iter:
-            netF.eval()
-            netB.eval()
-            if args.dset=='VISDA-C':
-                acc_s_te, acc_list = cal_acc(dset_loaders['test'], netF, netB, netC, True)
-                log_str = 'Task: {}, Iter:{}/{}; Accuracy = {:.2f}%'.format(args.name, iter_num, max_iter, acc_s_te) + '\n' + acc_list
+            if args.cls_par > 0:
+                pred = mem_label[tar_idx]
+                classifier_loss = nn.CrossEntropyLoss()(outputs_test, pred)
+                classifier_loss *= args.cls_par
+                if iter_num < interval_iter and args.dset == "VISDA-C":
+                    classifier_loss *= 0
             else:
-                acc_s_te, _ = cal_acc(dset_loaders['test'], netF, netB, netC, False)
-                log_str = 'Task: {}, Iter:{}/{}; Accuracy = {:.2f}%'.format(args.name, iter_num, max_iter, acc_s_te)
+                classifier_loss = torch.tensor(0.0).cuda()
 
-            args.out_file.write(log_str + '\n')
-            args.out_file.flush()
-            print(log_str+'\n')
-            netF.train()
-            netB.train()
+            if args.ent:
+                softmax_out = nn.Softmax(dim=1)(outputs_test)
+                entropy_loss = torch.mean(loss.Entropy(softmax_out))
+                if args.gent:
+                    msoftmax = softmax_out.mean(dim=0)
+                    gentropy_loss = torch.sum(-msoftmax * torch.log(msoftmax + args.epsilon))
+                    entropy_loss -= gentropy_loss
+                im_loss = entropy_loss * args.ent_par
+                classifier_loss += im_loss
+
+            optimizer.zero_grad()
+            classifier_loss.backward()
+            optimizer.step()
+
+            if iter_num % interval_iter == 0 or iter_num == max_iter:
+                netF.eval()
+                netB.eval()
+                if args.dset=='VISDA-C':
+                    acc_s_te, acc_list = cal_acc(dset_loaders['test'], netF, netB, netC, True)
+                    log_str = 'Task: {}, Iter:{}/{}; Accuracy = {:.2f}%'.format(args.name, iter_num, max_iter, acc_s_te) + '\n' + acc_list
+                else:
+                    acc_s_te, _ = cal_acc(dset_loaders['test'], netF, netB, netC, False)
+                    log_str = 'Task: {}, Iter:{}/{}; Accuracy = {:.2f}%'.format(args.name, iter_num, max_iter, acc_s_te)
+
+                args.out_file.write(log_str + '\n')
+                args.out_file.flush()
+                print(log_str+'\n')
+                netF.train()
+                netB.train()
 
     if args.issave:   
         torch.save(netF.state_dict(), osp.join(args.output_dir, "target_F_" + args.savename + ".pt"))
@@ -244,7 +246,7 @@ def obtain_label(loader, netF, netB, netC, args):
     with torch.no_grad():
         iter_test = iter(loader)
         for _ in range(len(loader)):
-            data = iter_test.next()
+            data = next(iter_test)
             inputs = data[0]
             labels = data[1]
             inputs = inputs.cuda()

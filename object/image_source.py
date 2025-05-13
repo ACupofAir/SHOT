@@ -369,8 +369,8 @@ if __name__ == "__main__":
             args.src_classes = [i for i in range(25)]
             args.tar_classes = [i for i in range(65)]
 
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    args.output_dir_src = osp.join(args.output, args.da, args.dset, names[args.s][0].upper(), timestamp)
+    # timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    args.output_dir_src = osp.join(args.output, args.da, args.dset, names[args.s][0].upper())
     print(args.output_dir_src)
     args.name_src = names[args.s][0].upper()
     if not osp.exists(args.output_dir_src):
