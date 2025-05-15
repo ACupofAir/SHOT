@@ -15,48 +15,59 @@ from tqdm import tqdm
 from scipy.spatial.distance import cdist
 from sklearn.metrics import confusion_matrix
 
+
 def op_copy(optimizer):
     for param_group in optimizer.param_groups:
-        param_group['lr0'] = param_group['lr']
+        param_group["lr0"] = param_group["lr"]
     return optimizer
+
 
 def lr_scheduler(optimizer, iter_num, max_iter, gamma=10, power=0.75):
     decay = (1 + gamma * iter_num / max_iter) ** (-power)
     for param_group in optimizer.param_groups:
-        param_group['lr'] = param_group['lr0'] * decay
-        param_group['weight_decay'] = 1e-3
-        param_group['momentum'] = 0.9
-        param_group['nesterov'] = True
+        param_group["lr"] = param_group["lr0"] * decay
+        param_group["weight_decay"] = 1e-3
+        param_group["momentum"] = 0.9
+        param_group["nesterov"] = True
     return optimizer
 
+
 def image_train(resize_size=256, crop_size=224, alexnet=False):
-  if not alexnet:
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                   std=[0.229, 0.224, 0.225])
-  else:
-    normalize = Normalize(meanfile='./ilsvrc_2012_mean.npy')
-  return  transforms.Compose([
-        transforms.Resize((resize_size, resize_size)),
-        transforms.RandomCrop(crop_size),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        normalize
-    ])
+    if not alexnet:
+        normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+        )
+    else:
+        normalize = Normalize(meanfile="./ilsvrc_2012_mean.npy")
+    return transforms.Compose(
+        [
+            transforms.Resize((resize_size, resize_size)),
+            transforms.RandomCrop(crop_size),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            normalize,
+        ]
+    )
+
 
 def image_test(resize_size=256, crop_size=224, alexnet=False):
-  if not alexnet:
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                   std=[0.229, 0.224, 0.225])
-  else:
-    normalize = Normalize(meanfile='./ilsvrc_2012_mean.npy')
-  return  transforms.Compose([
-        transforms.Resize((resize_size, resize_size)),
-        transforms.CenterCrop(crop_size),
-        transforms.ToTensor(),
-        normalize
-    ])
+    if not alexnet:
+        normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+        )
+    else:
+        normalize = Normalize(meanfile="./ilsvrc_2012_mean.npy")
+    return transforms.Compose(
+        [
+            transforms.Resize((resize_size, resize_size)),
+            transforms.CenterCrop(crop_size),
+            transforms.ToTensor(),
+            normalize,
+        ]
+    )
 
-def data_load(args): 
+
+def data_load(args):
     ## prepare data
     dsets = {}
     dset_loaders = {}
@@ -64,7 +75,7 @@ def data_load(args):
     txt_tar = open(args.t_dset_path).readlines()
     txt_test = open(args.test_dset_path).readlines()
 
-    if not args.da == 'uda':
+    if not args.da == "uda":
         label_map_s = {}
         for i in range(len(args.src_classes)):
             label_map_s[args.src_classes[i]] = i
@@ -72,23 +83,36 @@ def data_load(args):
         new_tar = []
         for i in range(len(txt_tar)):
             rec = txt_tar[i]
-            reci = rec.strip().split(' ')
+            reci = rec.strip().split(" ")
             if int(reci[1]) in args.tar_classes:
                 if int(reci[1]) in args.src_classes:
-                    line = reci[0] + ' ' + str(label_map_s[int(reci[1])]) + '\n'   
+                    line = reci[0] + " " + str(label_map_s[int(reci[1])]) + "\n"
                     new_tar.append(line)
                 else:
-                    line = reci[0] + ' ' + str(len(label_map_s)) + '\n'   
+                    line = reci[0] + " " + str(len(label_map_s)) + "\n"
                     new_tar.append(line)
         txt_tar = new_tar.copy()
         txt_test = txt_tar.copy()
 
     dsets["target"] = ImageList_idx(txt_tar, transform=image_train())
-    dset_loaders["target"] = DataLoader(dsets["target"], batch_size=train_bs, shuffle=True, num_workers=args.worker, drop_last=False)
+    dset_loaders["target"] = DataLoader(
+        dsets["target"],
+        batch_size=train_bs,
+        shuffle=True,
+        num_workers=args.worker,
+        drop_last=False,
+    )
     dsets["test"] = ImageList_idx(txt_test, transform=image_test())
-    dset_loaders["test"] = DataLoader(dsets["test"], batch_size=train_bs*3, shuffle=False, num_workers=args.worker, drop_last=False)
+    dset_loaders["test"] = DataLoader(
+        dsets["test"],
+        batch_size=train_bs * 3,
+        shuffle=False,
+        num_workers=args.worker,
+        drop_last=False,
+    )
 
     return dset_loaders
+
 
 def cal_acc(loader, netF, netB, netC, flag=False):
     start_test = True
@@ -108,35 +132,44 @@ def cal_acc(loader, netF, netB, netC, flag=False):
                 all_output = torch.cat((all_output, outputs.float().cpu()), 0)
                 all_label = torch.cat((all_label, labels.float()), 0)
     _, predict = torch.max(all_output, 1)
-    accuracy = torch.sum(torch.squeeze(predict).float() == all_label).item() / float(all_label.size()[0])
+    accuracy = torch.sum(torch.squeeze(predict).float() == all_label).item() / float(
+        all_label.size()[0]
+    )
     mean_ent = torch.mean(loss.Entropy(nn.Softmax(dim=1)(all_output))).cpu().data.item()
 
     if flag:
         matrix = confusion_matrix(all_label, torch.squeeze(predict).float())
-        acc = matrix.diagonal()/matrix.sum(axis=1) * 100
+        acc = matrix.diagonal() / matrix.sum(axis=1) * 100
         aacc = acc.mean()
         aa = [str(np.round(i, 2)) for i in acc]
-        acc = ' '.join(aa)
+        acc = " ".join(aa)
         return aacc, acc
     else:
-        return accuracy*100, mean_ent
+        return accuracy * 100, mean_ent
+
 
 def train_target(args):
     dset_loaders = data_load(args)
     ## set base network
-    if args.net[0:3] == 'res':
+    if args.net[0:3] == "res":
         netF = network.ResBase(res_name=args.net).cuda()
-    elif args.net[0:3] == 'vgg':
-        netF = network.VGGBase(vgg_name=args.net).cuda()  
+    elif args.net[0:3] == "vgg":
+        netF = network.VGGBase(vgg_name=args.net).cuda()
 
-    netB = network.feat_bottleneck(type=args.classifier, feature_dim=netF.in_features, bottleneck_dim=args.bottleneck).cuda()
-    netC = network.feat_classifier(type=args.layer, class_num = args.class_num, bottleneck_dim=args.bottleneck).cuda()
+    netB = network.feat_bottleneck(
+        type=args.classifier,
+        feature_dim=netF.in_features,
+        bottleneck_dim=args.bottleneck,
+    ).cuda()
+    netC = network.feat_classifier(
+        type=args.layer, class_num=args.class_num, bottleneck_dim=args.bottleneck
+    ).cuda()
 
-    modelpath = args.output_dir_src + '/source_F.pt'   
+    modelpath = args.output_dir_src + "/source_F.pt"
     netF.load_state_dict(torch.load(modelpath))
-    modelpath = args.output_dir_src + '/source_B.pt'   
+    modelpath = args.output_dir_src + "/source_B.pt"
     netB.load_state_dict(torch.load(modelpath))
-    modelpath = args.output_dir_src + '/source_C.pt'    
+    modelpath = args.output_dir_src + "/source_C.pt"
     netC.load_state_dict(torch.load(modelpath))
     netC.eval()
     for k, v in netC.named_parameters():
@@ -145,12 +178,12 @@ def train_target(args):
     param_group = []
     for k, v in netF.named_parameters():
         if args.lr_decay1 > 0:
-            param_group += [{'params': v, 'lr': args.lr * args.lr_decay1}]
+            param_group += [{"params": v, "lr": args.lr * args.lr_decay1}]
         else:
             v.requires_grad = False
     for k, v in netB.named_parameters():
         if args.lr_decay2 > 0:
-            param_group += [{'params': v, 'lr': args.lr * args.lr_decay2}]
+            param_group += [{"params": v, "lr": args.lr * args.lr_decay2}]
         else:
             v.requires_grad = False
 
@@ -170,12 +203,16 @@ def train_target(args):
                 inputs_test, _, tar_idx = next(iter_test)
 
             if inputs_test.size(0) == 1:
-                raise ValueError("Batch size must be greater than 1. Current batch size: {}".format(inputs_test.size(0)))
+                raise ValueError(
+                    "Batch size must be greater than 1. Current batch size: {}".format(
+                        inputs_test.size(0)
+                    )
+                )
 
             if iter_num % interval_iter == 0 and args.cls_par > 0:
                 netF.eval()
                 netB.eval()
-                mem_label = obtain_label(dset_loaders['test'], netF, netB, netC, args)
+                mem_label = obtain_label(dset_loaders["test"], netF, netB, netC, args)
                 mem_label = torch.from_numpy(mem_label).cuda()
                 netF.train()
                 netB.train()
@@ -203,7 +240,9 @@ def train_target(args):
                 entropy_loss = torch.mean(loss.Entropy(softmax_out))
                 if args.gent:
                     msoftmax = softmax_out.mean(dim=0)
-                    gentropy_loss = torch.sum(-msoftmax * torch.log(msoftmax + args.epsilon))
+                    gentropy_loss = torch.sum(
+                        -msoftmax * torch.log(msoftmax + args.epsilon)
+                    )
                     entropy_loss -= gentropy_loss
                 im_loss = entropy_loss * args.ent_par
                 classifier_loss += im_loss
@@ -215,31 +254,52 @@ def train_target(args):
             if iter_num % interval_iter == 0 or iter_num == max_iter:
                 netF.eval()
                 netB.eval()
-                if args.dset=='VISDA-C':
-                    acc_s_te, acc_list = cal_acc(dset_loaders['test'], netF, netB, netC, True)
-                    log_str = 'Task: {}, Iter:{}/{}; Accuracy = {:.2f}%'.format(args.name, iter_num, max_iter, acc_s_te) + '\n' + acc_list
+                if args.dset == "VISDA-C":
+                    acc_s_te, acc_list = cal_acc(
+                        dset_loaders["test"], netF, netB, netC, True
+                    )
+                    log_str = (
+                        "Task: {}, Iter:{}/{}; Accuracy = {:.2f}%".format(
+                            args.name, iter_num, max_iter, acc_s_te
+                        )
+                        + "\n"
+                        + acc_list
+                    )
                 else:
-                    acc_s_te, _ = cal_acc(dset_loaders['test'], netF, netB, netC, False)
-                    log_str = 'Task: {}, Iter:{}/{}; Accuracy = {:.2f}%'.format(args.name, iter_num, max_iter, acc_s_te)
+                    acc_s_te, _ = cal_acc(dset_loaders["test"], netF, netB, netC, False)
+                    log_str = "Task: {}, Iter:{}/{}; Accuracy = {:.2f}%".format(
+                        args.name, iter_num, max_iter, acc_s_te
+                    )
 
-                args.out_file.write(log_str + '\n')
+                args.out_file.write(log_str + "\n")
                 args.out_file.flush()
-                print(log_str+'\n')
+                print(log_str + "\n")
                 netF.train()
                 netB.train()
 
-    if args.issave:   
-        torch.save(netF.state_dict(), osp.join(args.output_dir, "target_F_" + args.savename + ".pt"))
-        torch.save(netB.state_dict(), osp.join(args.output_dir, "target_B_" + args.savename + ".pt"))
-        torch.save(netC.state_dict(), osp.join(args.output_dir, "target_C_" + args.savename + ".pt"))
-        
+    if args.issave:
+        torch.save(
+            netF.state_dict(),
+            osp.join(args.output_dir, "target_F_" + args.savename + ".pt"),
+        )
+        torch.save(
+            netB.state_dict(),
+            osp.join(args.output_dir, "target_B_" + args.savename + ".pt"),
+        )
+        torch.save(
+            netC.state_dict(),
+            osp.join(args.output_dir, "target_C_" + args.savename + ".pt"),
+        )
+
     return netF, netB, netC
+
 
 def print_args(args):
     s = "==========================================\n"
     for arg, content in args.__dict__.items():
         s += "{}:{}\n".format(arg, content)
     return s
+
 
 def obtain_label(loader, netF, netB, netC, args):
     start_test = True
@@ -267,8 +327,10 @@ def obtain_label(loader, netF, netB, netC, args):
     unknown_weight = 1 - ent / np.log(args.class_num)
     _, predict = torch.max(all_output, 1)
 
-    accuracy = torch.sum(torch.squeeze(predict).float() == all_label).item() / float(all_label.size()[0])
-    if args.distance == 'cosine':
+    accuracy = torch.sum(torch.squeeze(predict).float() == all_label).item() / float(
+        all_label.size()[0]
+    )
+    if args.distance == "cosine":
         all_fea = torch.cat((all_fea, torch.ones(all_fea.size(0), 1)), 1)
         all_fea = (all_fea.t() / torch.norm(all_fea, p=2, dim=1)).t()
 
@@ -278,9 +340,9 @@ def obtain_label(loader, netF, netB, netC, args):
 
     for _ in range(2):
         initc = aff.transpose().dot(all_fea)
-        initc = initc / (1e-8 + aff.sum(axis=0)[:,None])
+        initc = initc / (1e-8 + aff.sum(axis=0)[:, None])
         cls_count = np.eye(K)[predict].sum(axis=0)
-        labelset = np.where(cls_count>args.threshold)
+        labelset = np.where(cls_count > args.threshold)
         labelset = labelset[0]
 
         dd = cdist(all_fea, initc[labelset], args.distance)
@@ -290,61 +352,72 @@ def obtain_label(loader, netF, netB, netC, args):
         aff = np.eye(K)[predict]
 
     acc = np.sum(predict == all_label.float().numpy()) / len(all_fea)
-    log_str = 'Accuracy = {:.2f}% -> {:.2f}%'.format(accuracy * 100, acc * 100)
+    log_str = "Accuracy = {:.2f}% -> {:.2f}%".format(accuracy * 100, acc * 100)
 
-    args.out_file.write(log_str + '\n')
+    args.out_file.write(log_str + "\n")
     args.out_file.flush()
-    print(log_str+'\n')
+    print(log_str + "\n")
 
-    return predict.astype('int')
+    return predict.astype("int")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='SHOT')
-    parser.add_argument('--gpu_id', type=str, nargs='?', default='0', help="device id to run")
-    parser.add_argument('--s', type=int, default=0, help="source")
-    parser.add_argument('--t', type=int, default=1, help="target")
-    parser.add_argument('--max_epoch', type=int, default=15, help="max iterations")
-    parser.add_argument('--interval', type=int, default=15)
-    parser.add_argument('--batch_size', type=int, default=64, help="batch_size")
-    parser.add_argument('--worker', type=int, default=4, help="number of workers")
-    parser.add_argument('--dset', type=str, default='office-home', choices=['VISDA-C', 'office', 'office-home', 'office-caltech'])
-    parser.add_argument('--lr', type=float, default=1e-2, help="learning rate")
-    parser.add_argument('--net', type=str, default='resnet50', help="alexnet, vgg16, resnet50, res101")
-    parser.add_argument('--seed', type=int, default=2020, help="random seed")
- 
-    parser.add_argument('--gent', type=bool, default=True)
-    parser.add_argument('--ent', type=bool, default=True)
-    parser.add_argument('--threshold', type=int, default=0)
-    parser.add_argument('--cls_par', type=float, default=0.3)
-    parser.add_argument('--ent_par', type=float, default=1.0)
-    parser.add_argument('--lr_decay1', type=float, default=0.1)
-    parser.add_argument('--lr_decay2', type=float, default=1.0)
+    parser = argparse.ArgumentParser(description="SHOT")
+    parser.add_argument(
+        "--gpu_id", type=str, nargs="?", default="0", help="device id to run"
+    )
+    parser.add_argument("--s", type=int, default=0, help="source")
+    parser.add_argument("--t", type=int, default=1, help="target")
+    parser.add_argument("--max_epoch", type=int, default=15, help="max iterations")
+    parser.add_argument("--interval", type=int, default=15)
+    parser.add_argument("--batch_size", type=int, default=64, help="batch_size")
+    parser.add_argument("--worker", type=int, default=4, help="number of workers")
+    parser.add_argument(
+        "--dset",
+        type=str,
+        default="office-home",
+        choices=["VISDA-C", "office", "office-home", "office-caltech"],
+    )
+    parser.add_argument("--lr", type=float, default=1e-2, help="learning rate")
+    parser.add_argument(
+        "--net", type=str, default="resnet50", help="alexnet, vgg16, resnet50, res101"
+    )
+    parser.add_argument("--seed", type=int, default=2020, help="random seed")
 
-    parser.add_argument('--bottleneck', type=int, default=256)
-    parser.add_argument('--epsilon', type=float, default=1e-5)
-    parser.add_argument('--layer', type=str, default="wn", choices=["linear", "wn"])
-    parser.add_argument('--classifier', type=str, default="bn", choices=["ori", "bn"])
-    parser.add_argument('--distance', type=str, default='cosine', choices=["euclidean", "cosine"])  
-    parser.add_argument('--output', type=str, default='san')
-    parser.add_argument('--output_src', type=str, default='san')
-    parser.add_argument('--da', type=str, default='uda', choices=['uda', 'pda'])
-    parser.add_argument('--issave', type=bool, default=True)
+    parser.add_argument("--gent", type=bool, default=True)
+    parser.add_argument("--ent", type=bool, default=True)
+    parser.add_argument("--threshold", type=int, default=0)
+    parser.add_argument("--cls_par", type=float, default=0.3)
+    parser.add_argument("--ent_par", type=float, default=1.0)
+    parser.add_argument("--lr_decay1", type=float, default=0.1)
+    parser.add_argument("--lr_decay2", type=float, default=1.0)
+
+    parser.add_argument("--bottleneck", type=int, default=256)
+    parser.add_argument("--epsilon", type=float, default=1e-5)
+    parser.add_argument("--layer", type=str, default="wn", choices=["linear", "wn"])
+    parser.add_argument("--classifier", type=str, default="bn", choices=["ori", "bn"])
+    parser.add_argument(
+        "--distance", type=str, default="cosine", choices=["euclidean", "cosine"]
+    )
+    parser.add_argument("--output", type=str, default="san")
+    parser.add_argument("--output_src", type=str, default="san")
+    parser.add_argument("--da", type=str, default="uda", choices=["uda", "pda"])
+    parser.add_argument("--issave", type=bool, default=True)
     args = parser.parse_args()
 
-    if args.dset == 'office-home':
-        names = ['Art', 'Clipart', 'Product', 'RealWorld']
-        args.class_num = 65 
-    if args.dset == 'office':
-        names = ['amazon', 'dslr', 'webcam']
+    if args.dset == "office-home":
+        names = ["Art", "Clipart", "Product", "RealWorld"]
+        args.class_num = 65
+    if args.dset == "office":
+        names = ["amazon", "dslr", "webcam"]
         args.class_num = 31
-    if args.dset == 'VISDA-C':
-        names = ['train', 'validation']
+    if args.dset == "VISDA-C":
+        names = ["train", "validation"]
         args.class_num = 12
-    if args.dset == 'office-caltech':
-        names = ['amazon', 'caltech', 'dslr', 'webcam']
+    if args.dset == "office-caltech":
+        names = ["amazon", "caltech", "dslr", "webcam"]
         args.class_num = 10
-        
+
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
     SEED = args.seed
     torch.manual_seed(SEED)
@@ -358,31 +431,40 @@ if __name__ == "__main__":
             continue
         args.t = i
 
-        folder = './data/'
-        args.s_dset_path = folder + args.dset + '/' + names[args.s] + '_list.txt'
-        args.t_dset_path = folder + args.dset + '/' + names[args.t] + '_list.txt'
-        args.test_dset_path = folder + args.dset + '/' + names[args.t] + '_list.txt'
+        folder = "./data/"
+        args.s_dset_path = folder + args.dset + "/" + names[args.s] + "_list.txt"
+        args.t_dset_path = folder + args.dset + "/" + names[args.t] + "_list.txt"
+        args.test_dset_path = folder + args.dset + "/" + names[args.t] + "_list.txt"
 
-        if args.dset == 'office-home':
-            if args.da == 'pda':
+        if args.dset == "office-home":
+            if args.da == "pda":
                 args.class_num = 65
                 args.src_classes = [i for i in range(65)]
                 args.tar_classes = [i for i in range(25)]
 
-        args.output_dir_src = osp.join(args.output_src, args.da, args.dset, names[args.s][0].upper())
-        args.output_dir = osp.join(args.output, args.da, args.dset, names[args.s][0].upper()+names[args.t][0].upper())
-        args.name = names[args.s][0].upper()+names[args.t][0].upper()
+        args.output_dir_src = osp.join(
+            args.output_src, args.da, args.dset, names[args.s][0].upper()
+        )
+        args.output_dir = osp.join(
+            args.output,
+            args.da,
+            args.dset,
+            names[args.s][0].upper() + names[args.t][0].upper(),
+        )
+        args.name = names[args.s][0].upper() + names[args.t][0].upper()
 
         if not osp.exists(args.output_dir):
-            os.system('mkdir -p ' + args.output_dir)
+            os.system("mkdir -p " + args.output_dir)
         if not osp.exists(args.output_dir):
             os.mkdir(args.output_dir)
 
-        args.savename = 'par_' + str(args.cls_par)
-        if args.da == 'pda':
-            args.gent = ''
-            args.savename = 'par_' + str(args.cls_par) + '_thr' + str(args.threshold)
-        args.out_file = open(osp.join(args.output_dir, 'log_' + args.savename + '.txt'), 'w')
-        args.out_file.write(print_args(args)+'\n')
+        args.savename = "par_" + str(args.cls_par)
+        if args.da == "pda":
+            args.gent = ""
+            args.savename = "par_" + str(args.cls_par) + "_thr" + str(args.threshold)
+        args.out_file = open(
+            osp.join(args.output_dir, "log_" + args.savename + ".txt"), "w"
+        )
+        args.out_file.write(print_args(args) + "\n")
         args.out_file.flush()
         train_target(args)
